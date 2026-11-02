@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import sys
+import uuid
 from pathlib import Path
 from typing import Dict, Sequence
 
@@ -16,9 +17,12 @@ from pdb_utils import fetch_pdb_text, parse_pdb_chains
 from protein_analysis import (
     AA_NAMES,
     AA_TO_THREE,
+    ACIDIC_RESIDUES,
+    BASIC_RESIDUES,
     ExtendedMetrics,
     HYDROPHOBICITY,
     ProteinStats,
+    TERMINUS_PKA,
     calculate_extended_metrics,
     calculate_protein_stats,
     hydrophobicity_profile,
@@ -53,6 +57,18 @@ class AnalysisBridge:
             @Slot(str, result=str)
             def fetchPdb(self, pdb_id: str) -> str:
                 return self.owner._json(self.owner.fetchPdb(pdb_id))
+
+            @Slot(result=str)
+            def openPdb(self) -> str:
+                return self.owner._json(self.owner.openPdb())
+
+            @Slot(result=str)
+            def downloadPdb(self) -> str:
+                return self.owner._json(self.owner.downloadPdb())
+
+            @Slot(result=str)
+            def clearPdb(self) -> str:
+                return self.owner._json(self.owner.clearPdb())
 
             @Slot(str, str, result=str)
             def analyzeChain(self, pdb_id: str, chain_id: str) -> str:
@@ -126,6 +142,10 @@ class AnalysisBridge:
         self.pdb_chains: Dict[str, str] = {}
         self.active_pdb_chains: Dict[str, str] | None = None
         self.current_pdb_id = ""
+        self.current_structure_key = ""
+        self.current_structure_name = ""
+        self.current_pdb_text = ""
+        self.downloadable_pdb_id = ""
         self.bridge_object = BridgeObject(self)
         QApplication.instance().styleHints().colorSchemeChanged.connect(
             self._on_system_color_scheme_changed
@@ -170,6 +190,8 @@ class AnalysisBridge:
         if context != "structure":
             self.active_pdb_chains = None
             self.current_pdb_id = ""
+            self.current_structure_key = ""
+            self.current_structure_name = ""
         return self._record_analysis(stats, metrics, name, context, invalid)
 
     def _record_analysis(
@@ -208,10 +230,27 @@ class AnalysisBridge:
                         "fullName": AA_NAMES.get(residue, "Ambiguous residue"),
                         "abbreviation": AA_TO_THREE.get(residue, "UNK"),
                         "value": HYDROPHOBICITY.get(residue, 0.0),
+                        "basicPka": BASIC_RESIDUES.get(residue),
+                        "acidicPka": ACIDIC_RESIDUES.get(residue),
+                        "isNTerminal": position == 1,
+                        "isCTerminal": position == stats.length,
                     }
                 )
         payload["residueDetails"] = residue_details
+        payload["chargeModel"] = {
+            "nTerminusPka": TERMINUS_PKA["N"],
+            "cTerminusPka": TERMINUS_PKA["C"],
+        }
         payload["pdbId"] = self.current_pdb_id if context == "structure" else ""
+        payload["structureName"] = (
+            self.current_structure_name if context == "structure" else ""
+        )
+        payload["pdbDownloadAvailable"] = bool(
+            context == "structure"
+            and self.current_pdb_id
+            and self.downloadable_pdb_id
+            and self.current_pdb_text
+        )
         payload["pdbChains"] = [
             {"id": chain_id, "length": len(chain)}
             for chain_id, chain in sorted(self.pdb_chains.items())
@@ -316,10 +355,6 @@ class AnalysisBridge:
             "composition": composition,
             "hydrophobicity": hydrophobicity_profile(stats.sequence, window_size=7),
             "chemistry": chemistry,
-            "charge": [
-                [f"{ph:g}", f"{charge:.3f}"]
-                for ph, charge in metrics["charge_profile"]
-            ],
             "features": features,
             "cleavageSites": metrics["cleavage_sites"],
             "signalPeptideCleavageCandidates": metrics[
@@ -340,6 +375,10 @@ class AnalysisBridge:
             return {"ok": False, "error": "No protein chain data was found in that structure."}
         self.pdb_chains = chains
         self.current_pdb_id = identifier
+        self.current_structure_key = identifier
+        self.current_structure_name = f"PDB {identifier}"
+        self.current_pdb_text = pdb_text
+        self.downloadable_pdb_id = identifier
         self.active_pdb_chains = None
         self.last_stats = None
         self.last_analysis = None
@@ -348,6 +387,7 @@ class AnalysisBridge:
         return {
             "ok": True,
             "pdbId": identifier,
+            "structureKey": self.current_structure_key,
             "selectedChain": first_chain,
             "chains": [
                 {"id": chain_id, "length": len(sequence)}
@@ -355,27 +395,106 @@ class AnalysisBridge:
             ],
         }
 
-    def analyzeChain(self, pdb_id: str, chain_id: str) -> dict[str, object]:
-        if pdb_id.strip().upper() != self.current_pdb_id:
-            return {"ok": False, "error": "Fetch this PDB structure before selecting a chain."}
+    def openPdb(self) -> dict[str, object]:
+        path, _ = QFileDialog.getOpenFileName(
+            self.window,
+            "Import PDB or CIF structure",
+            "",
+            "Structure files (*.pdb *.ent *.cif *.mmcif);;All files (*)",
+        )
+        if not path:
+            return {"ok": False, "cancelled": True}
+        try:
+            pdb_text = Path(path).read_text(encoding="utf-8", errors="replace")
+            chains = parse_pdb_chains(pdb_text)
+        except (OSError, ValueError) as exc:
+            return {"ok": False, "error": str(exc)}
+        if not chains:
+            return {"ok": False, "error": "No protein chain data was found in that file."}
+
+        self.pdb_chains = chains
+        self.current_pdb_id = ""
+        self.current_structure_key = f"upload:{uuid.uuid4().hex}"
+        self.current_structure_name = Path(path).stem or "Uploaded PDB"
+        self.current_pdb_text = pdb_text
+        self.downloadable_pdb_id = ""
+        self.active_pdb_chains = None
+        self.last_stats = None
+        self.last_analysis = None
+        self.last_context = ""
+        return {
+            "ok": True,
+            "structureKey": self.current_structure_key,
+            "structureName": self.current_structure_name,
+            "selectedChain": sorted(chains)[0],
+            "chains": [
+                {"id": chain_id, "length": len(sequence)}
+                for chain_id, sequence in sorted(chains.items())
+            ],
+        }
+
+    def downloadPdb(self) -> dict[str, object]:
+        if not self.downloadable_pdb_id or not self.current_pdb_text:
+            return {"ok": False, "error": "Fetch a PDB structure before downloading it."}
+        path, _ = QFileDialog.getSaveFileName(
+            self.window,
+            "Download PDB structure",
+            f"{self.downloadable_pdb_id}.pdb",
+            "PDB structure (*.pdb)",
+        )
+        if not path:
+            return {"ok": False, "cancelled": True}
+        if Path(path).suffix.lower() != ".pdb":
+            path += ".pdb"
+        try:
+            Path(path).write_text(self.current_pdb_text, encoding="utf-8")
+        except OSError as exc:
+            return {"ok": False, "error": str(exc)}
+        return {"ok": True, "message": f"PDB saved to {path}"}
+
+    def clearPdb(self) -> dict[str, object]:
+        had_structure = bool(
+            self.pdb_chains
+            or self.current_structure_key
+            or self.current_pdb_text
+        )
+        self.pdb_chains = {}
+        self.active_pdb_chains = None
+        self.current_pdb_id = ""
+        self.current_structure_key = ""
+        self.current_structure_name = ""
+        self.current_pdb_text = ""
+        self.downloadable_pdb_id = ""
+        if self.last_context == "structure":
+            self.last_stats = None
+            self.last_analysis = None
+            self.last_context = ""
+            self.last_name = "Protein"
+        return {
+            "ok": True,
+            "cleared": had_structure,
+        }
+
+    def analyzeChain(self, structure_key: str, chain_id: str) -> dict[str, object]:
+        if structure_key != self.current_structure_key:
+            return {"ok": False, "error": "Load this PDB structure before selecting a chain."}
         sequence = self.pdb_chains.get(chain_id)
         if sequence is None:
             return {"ok": False, "error": "Select an available protein chain."}
         self.active_pdb_chains = {chain_id: sequence}
         return self.analyzeSequence(
-            sequence, f"PDB {pdb_id.strip().upper()} chain {chain_id}", "structure"
+            sequence, f"{self.current_structure_name} chain {chain_id}", "structure"
         )
 
-    def analyzeAllChains(self, pdb_id: str) -> dict[str, object]:
-        if pdb_id.strip().upper() != self.current_pdb_id or not self.pdb_chains:
-            return {"ok": False, "error": "Fetch this PDB structure before analyzing its chains."}
+    def analyzeAllChains(self, structure_key: str) -> dict[str, object]:
+        if structure_key != self.current_structure_key or not self.pdb_chains:
+            return {"ok": False, "error": "Load this PDB structure before analyzing its chains."}
         self.active_pdb_chains = dict(self.pdb_chains)
         sequence = "".join(
             chain for _chain_id, chain in sorted(self.active_pdb_chains.items())
         )
-        identifier = self.current_pdb_id
         return self.analyzeSequence(
-            sequence, f"PDB {identifier} all chains", "structure"
+            sequence, f"{self.current_structure_name} all chains", "structure"
         )
 
     def analyzeAntibody(
@@ -417,6 +536,8 @@ class AnalysisBridge:
         self.last_name = f"{antibody_type} antibody"
         self.active_pdb_chains = None
         self.current_pdb_id = ""
+        self.current_structure_key = ""
+        self.current_structure_name = ""
         analysis = {
             "name": self.last_name,
             "ok": True,
@@ -506,6 +627,10 @@ class AnalysisBridge:
                     self.pdb_chains = chain_sequences
                     self.active_pdb_chains = chain_sequences.copy()
                     self.current_pdb_id = pdb_id
+                    self.current_structure_key = pdb_id
+                    self.current_structure_name = f"PDB {pdb_id}"
+                    self.current_pdb_text = ""
+                    self.downloadable_pdb_id = ""
                 result = self.analyzeSequence(sequence, name, str(context))
             if not result.get("ok"):
                 return result

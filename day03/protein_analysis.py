@@ -563,18 +563,43 @@ def calculate_protein_stats(sequence: str) -> ProteinStats:
 
 
 def net_charge_at_ph(sequence: str, ph: float) -> float:
-    charge = 0.0
-    for residue in sequence:
-        if residue in BASIC_RESIDUES:
-            pka = BASIC_RESIDUES[residue]
-            charge += 1.0 / (1.0 + 10 ** (pka - ph))
-        if residue in ACIDIC_RESIDUES:
-            pka = ACIDIC_RESIDUES[residue]
-            charge -= 1.0 / (1.0 + 10 ** (ph - pka))
+    if not sequence:
+        charge = 1.0 / (1.0 + 10 ** (TERMINUS_PKA["N"] - ph))
+        charge -= 1.0 / (1.0 + 10 ** (ph - TERMINUS_PKA["C"]))
+        return round(charge, 4)
+    return round(
+        sum(
+            residue_charge_at_ph(
+                residue,
+                ph,
+                is_n_terminal=index == 0,
+                is_c_terminal=index == len(sequence) - 1,
+            )
+            for index, residue in enumerate(sequence)
+        ),
+        4,
+    )
 
-    charge += 1.0 / (1.0 + 10 ** (TERMINUS_PKA["N"] - ph))
-    charge -= 1.0 / (1.0 + 10 ** (ph - TERMINUS_PKA["C"]))
-    return round(charge, 4)
+
+def residue_charge_at_ph(
+    residue: str,
+    ph: float,
+    is_n_terminal: bool = False,
+    is_c_terminal: bool = False,
+) -> float:
+    """Estimate one residue's side-chain and optional terminal charge at a pH."""
+    charge = 0.0
+    positive_pka = BASIC_RESIDUES.get(residue)
+    if positive_pka is not None:
+        charge += 1.0 / (1.0 + 10 ** (ph - positive_pka))
+    negative_pka = ACIDIC_RESIDUES.get(residue)
+    if negative_pka is not None:
+        charge -= 1.0 / (1.0 + 10 ** (negative_pka - ph))
+    if is_n_terminal:
+        charge += 1.0 / (1.0 + 10 ** (ph - TERMINUS_PKA["N"]))
+    if is_c_terminal:
+        charge -= 1.0 / (1.0 + 10 ** (TERMINUS_PKA["C"] - ph))
+    return charge
 
 
 def approximate_theoretical_pI(sequence: str) -> float:

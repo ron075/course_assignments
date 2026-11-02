@@ -20,6 +20,11 @@ let appSettings = null;
 let currentAnalysis = null;
 let visibleCategories = [];
 let activeCategory = "overview";
+let chargeProfilePh = 7.4;
+let selectedChargeResidues = null;
+let activeStructureKey = "";
+let activeStructureSource = "";
+const IONIZABLE_RESIDUES = ["D", "E", "H", "C", "Y", "K", "R"];
 let toastTimer = 0;
 
 function node(tag, className = "", text = "") {
@@ -107,6 +112,91 @@ function getCategories(context) {
   return enabled.length ? enabled : [context === "antibody" ? "antibody" : "overview"];
 }
 
+function parameterTooltip(label) {
+  const lower = String(label).trim().toLocaleLowerCase();
+  const definitions = {
+    "theoretical pi": "Predicted pH at which the protein has approximately zero net charge, calculated from ionizable groups.",
+    "gravy": "Grand average of hydropathicity: the mean Kyte–Doolittle hydropathy value across the sequence. Positive values indicate more hydrophobic sequences; negative values indicate more hydrophilic sequences.",
+    "gravy score": "Grand average of hydropathicity: the mean Kyte–Doolittle hydropathy value across the sequence. Positive values indicate more hydrophobic sequences; negative values indicate more hydrophilic sequences.",
+    "aromaticity": "Fraction of residues that are phenylalanine, tryptophan, or tyrosine.",
+    "extinction coefficient": "Estimated absorbance coefficient at 280 nm in water, in M⁻¹ cm⁻¹, based on tryptophan, tyrosine, and cystine content.",
+    "average residue mass": "Mean mass per amino-acid residue in the protein chain, accounting for water lost when peptide bonds form.",
+    "unique residues": "Number of distinct amino-acid residue types present in the sequence.",
+    "charge at ph 7": "Estimated total protein charge at pH 7 using Henderson–Hasselbalch ionization of terminal and ionizable side-chain groups.",
+    "instability index": "Sequence-based estimate of in-vitro protein stability. Values below 40 are classified as stable; values above 40 as unstable.",
+    "aliphatic index": "Relative volume contribution of alanine, valine, isoleucine, and leucine side chains; often used as an indicator of thermostability.",
+    "shannon entropy (standard residues)": "Sequence diversity in bits per residue, calculated from the frequencies of the 20 standard amino acids.",
+    "positive residues (k/r/h)": "Count of lysine, arginine, and histidine residues; this is a residue count, not the pH-dependent net charge.",
+    "negative residues (d/e)": "Count of aspartic acid and glutamic acid residues; this is a residue count, not the pH-dependent net charge.",
+    "basic residues": "Percentage of sequence residues that are lysine, arginine, or histidine.",
+    "acidic residues": "Percentage of sequence residues that are aspartic acid or glutamic acid.",
+    "cysteines": "Number of cysteine residues in the sequence.",
+    "potential disulfide pairs (upper bound)": "Maximum possible number of cysteine pairs, assuming every cysteine can form a disulfide bond.",
+    "all cysteine pairs form cystines": "Extinction estimate assumes cysteine residues pair into disulfide-bonded cystines.",
+    "all cysteines are reduced": "Extinction estimate assumes cysteine residues are unpaired and reduced.",
+    "absorbance": "Estimated absorbance of a 0.1% (1 g/L) protein solution in a 1 cm path-length cuvette.",
+    "estimated half-life": "Estimated time for half of the protein to be degraded under the listed organism or assay conditions, based on the N-end rule.",
+    "n-linked glycosylation sequons (n-x-s/t, x ≠ p; 1-based start)": "Potential N-linked glycosylation motif N-X-S/T, where X is any residue except proline. Positions are 1-based motif starts; a motif does not prove glycosylation.",
+    "transmembrane-like hydrophobic regions (19 aa, heuristic)": "Heuristic regions with a 19-residue Kyte–Doolittle hydrophobicity-window mean of at least 1.6; this is not a validated membrane-topology prediction.",
+    "serine/threonine-rich regions (10 aa, ≥ 50%; heuristic)": "Heuristic 10-residue windows containing at least 50% serine or threonine.",
+    "low-complexity regions (12 aa, ≥ 60% one residue; heuristic)": "Heuristic 12-residue windows where one amino-acid type makes up at least 60% of the window.",
+    "potential phosphorylation residues (s/t/y; not kinase-specific)": "Serine, threonine, and tyrosine positions that could be phosphorylation sites; no kinase specificity or experimental evidence is implied.",
+    "n-terminal signal-peptide cleavage candidates (heuristic -3/-1 rule)": "Candidate signal-peptide cut positions from a simple small-residue −3/−1 motif heuristic; not a validated cleavage prediction.",
+    "hydrophobic": "Residues with Kyte–Doolittle side-chain hydropathy values ≥ 1.",
+    "hydrophilic": "Residues with Kyte–Doolittle side-chain hydropathy values ≤ −1.",
+    "neutral": "For hydrophobicity grouping, residues with Kyte–Doolittle side-chain values between −1 and 1; in charge grouping, this label denotes the mostly neutral group at the selected native pH.",
+    "mostly positive": "Grouped by basic side-chain character at native pH; primarily lysine and arginine.",
+    "mostly negative": "Grouped by acidic side-chain character at native pH; primarily aspartic acid and glutamic acid.",
+    "mostly neutral": "Side chains with no substantial positive or negative charge at the app's native reference pH.",
+    "residue charge profile": "Estimated ionization charge of each ionizable amino-acid side chain at the selected pH. N- and C-terminal groups are described separately above.",
+    "hydrophobicity by residue": "Kyte–Doolittle hydropathy value at each sequence position. Larger positive values indicate more hydrophobic character.",
+    "hydrophobicity profile": "Moving-window mean of Kyte–Doolittle residue hydropathy scores; positive values indicate more hydrophobic sequence regions.",
+    "amino-acid hydrophobicity groups": "Residues grouped by Kyte–Doolittle side-chain value: hydrophobic ≥ 1, hydrophilic ≤ −1, neutral otherwise.",
+    "residue charge groups at native ph": "Residue side chains grouped by their predominant charge category at native pH; this is separate from the pH-dependent residue profile.",
+    "atomic composition": "Estimated element counts for a neutral polypeptide chain, including terminal water; ambiguous amino acids prevent an exact formula.",
+    "cleavage-site candidates": "Possible sequence cut sites from simplified enzyme rules; candidates are not evidence that cleavage occurs biologically.",
+    "sequence feature matches": "Sequence motifs and heuristic regions; matches alone do not establish that a feature occurs experimentally.",
+    "signal peptide (heuristic)": "Candidate signal-peptide cleavage positions from a simple −3/−1 rule; heuristic only.",
+    "atomic formula": "Estimated elemental formula of the neutral polypeptide, including terminal water.",
+    "trypsin": "Predicted cut after lysine (K) or arginine (R), except when the next residue is proline (P).",
+    "chymotrypsin": "Predicted cut after phenylalanine (F), tryptophan (W), or tyrosine (Y), except before proline (P).",
+    "lys-c": "Predicted cut after lysine (K), except before proline (P).",
+    "glu-c": "Predicted cut after glutamic acid (E), except before proline (P).",
+    "arg-c": "Predicted cut after arginine (R), except before proline (P).",
+    "asp-n": "Predicted cut before aspartic acid (D), excluding the N-terminal position.",
+    "cnbr": "Predicted cyanogen bromide cut after methionine (M).",
+  };
+  if (definitions[lower]) return definitions[lower];
+  if (lower.startsWith("hydrophobic windows")) {
+    return "Heuristic sequence regions whose moving-window Kyte–Doolittle mean reaches the threshold shown in the label.";
+  }
+  if (lower.startsWith("trypsin cleavage positions")) {
+    return definitions.trypsin;
+  }
+  if (lower.startsWith("cysteine positions")) {
+    return "1-based positions of cysteine residues, which may form disulfide bonds.";
+  }
+  if (lower.startsWith("n-linked glycosylation")) {
+    return definitions["n-linked glycosylation sequons (n-x-s/t, x ≠ p; 1-based start)"];
+  }
+  if (lower === "extinction coefficients") {
+    return "Estimated absorbance coefficients at 280 nm in water, based on aromatic residues and whether cysteines form disulfide bonds.";
+  }
+  if (lower === "sequence stability estimates") {
+    return "Sequence-based stability indicators; these estimates do not replace experimental stability measurements.";
+  }
+  if (/^(carbon|hydrogen|nitrogen|oxygen|sulfur)$/.test(lower)) {
+    return "Element count in the estimated neutral polypeptide formula, including terminal water.";
+  }
+  return "";
+}
+
+function addParameterTooltip(element, label) {
+  const explanation = parameterTooltip(label);
+  if (explanation) element.title = explanation;
+  return element;
+}
+
 function createTable(headers, rows, numericColumns = [], category = activeCategory, targetPrefix = "row") {
   const wrap = node("div", "table-wrap");
   const table = node("table", "data-table");
@@ -114,6 +204,7 @@ function createTable(headers, rows, numericColumns = [], category = activeCatego
   const headerRow = node("tr");
   headers.forEach((header, index) => {
     const th = node("th", numericColumns.includes(index) ? "numeric" : "", header);
+    addParameterTooltip(th, header);
     headerRow.append(th);
   });
   thead.append(headerRow);
@@ -123,7 +214,9 @@ function createTable(headers, rows, numericColumns = [], category = activeCatego
     tr.id = `search-target-${category}-${targetPrefix}-${index}`;
     tr.tabIndex = -1;
     row.forEach((value, index) => {
-      tr.append(node("td", numericColumns.includes(index) ? "numeric" : "", value));
+      const td = node("td", numericColumns.includes(index) ? "numeric" : "", value);
+      if (index === 0) addParameterTooltip(td, value);
+      tr.append(td);
     });
     tbody.append(tr);
   });
@@ -134,8 +227,10 @@ function createTable(headers, rows, numericColumns = [], category = activeCatego
 
 function referenceHeading(title, reference, tagName = "h3") {
   const heading = node(tagName);
+  addParameterTooltip(heading, title);
   if (appSettings?.enableReferenceLinks && reference) {
     const link = node("a", "reference-link", title);
+    addParameterTooltip(link, title);
     link.href = "#";
     link.dataset.reference = reference;
     heading.append(link);
@@ -168,7 +263,7 @@ function renderOverview(data) {
   data.cards.forEach(([label, value], index) => {
     const card = node("article", "metric-card");
     card.style.setProperty("--metric-accent", accents[index % accents.length]);
-    card.append(node("div", "metric-label", label));
+    card.append(addParameterTooltip(node("div", "metric-label", label), label));
     card.append(node("div", "metric-value", value));
     grid.append(card);
   });
@@ -366,10 +461,11 @@ function renderBarChart(items, chartClass = "") {
     fill.style.setProperty("--bar-color", item.color || "var(--accent)");
     fill.title = item.tooltip || `${item.label}: ${item.count} (${item.percent.toFixed(2)}%)`;
     track.append(fill);
+    const label = addParameterTooltip(node("strong", "bar-label", item.label), item.label);
     column.append(
       track,
-      node("strong", "bar-label", item.label),
-      node("span", "bar-detail", item.detail || ""),
+      label,
+      renderBarDetails(item),
       node("span", "bar-count", `${item.count} residues`),
       node("span", "bar-percent", `${item.percent.toFixed(2)}%`),
     );
@@ -379,7 +475,23 @@ function renderBarChart(items, chartClass = "") {
   return scroller;
 }
 
-function attachChartTooltip(svg, card, pointCount, getText) {
+function renderBarDetails(item) {
+  const details = node("span", "bar-detail");
+  if (item.residueDetails?.length) {
+    item.residueDetails.forEach((residue, index) => {
+      if (index) details.append(document.createTextNode(" "));
+      const letter = node("span", "residue-letter", residue.residue);
+      letter.title = `${residue.fullName} (${residue.abbreviation})`;
+      letter.setAttribute("aria-label", letter.title);
+      details.append(letter);
+    });
+  } else {
+    details.textContent = item.detail || "";
+  }
+  return details;
+}
+
+function attachChartTooltip(svg, card, pointCount, getText, pointXPositions = null) {
   const tooltip = node("div", "chart-tooltip");
   tooltip.hidden = true;
   card.append(tooltip);
@@ -393,11 +505,28 @@ function attachChartTooltip(svg, card, pointCount, getText) {
       tooltip.hidden = true;
       return;
     }
-    const fraction = (event.clientX - plotLeft) / (plotRight - plotLeft);
-    const index = Math.min(
-      pointCount - 1,
-      Math.max(0, Math.round(fraction * (pointCount - 1))),
-    );
+    const count = typeof pointCount === "function" ? pointCount() : pointCount;
+    if (!count) {
+      tooltip.hidden = true;
+      return;
+    }
+    let index;
+    if (pointXPositions) {
+      const positions = typeof pointXPositions === "function"
+        ? pointXPositions()
+        : pointXPositions;
+      const chartX = 66 + ((event.clientX - plotLeft) / (plotRight - plotLeft)) * (780 - 66);
+      index = positions.reduce(
+        (nearest, x, candidate) =>
+          Math.abs(x - chartX) < Math.abs(positions[nearest] - chartX)
+            ? candidate
+            : nearest,
+        0,
+      );
+    } else {
+      const fraction = (event.clientX - plotLeft) / (plotRight - plotLeft);
+      index = Math.min(count - 1, Math.max(0, Math.round(fraction * (count - 1))));
+    }
     tooltip.textContent = getText(index);
     tooltip.hidden = false;
     const cardBounds = card.getBoundingClientRect();
@@ -443,7 +572,11 @@ function groupComposition(composition, category) {
     const total = composition.reduce((sum, item) => sum + item.count, 0);
     return {
       label,
-      detail: residues.map((item) => item.residue).join(" "),
+      residueDetails: residues.map((item) => ({
+        residue: item.residue,
+        fullName: item.fullName,
+        abbreviation: item.abbreviation,
+      })),
       count,
       percent: total ? (count / total) * 100 : 0,
       color,
@@ -657,83 +790,210 @@ function renderHydrophobicity(data) {
   return panel;
 }
 
+function residueChargeAtPH(residue, ph) {
+  let charge = 0;
+  if (residue.basicPka !== null && residue.basicPka !== undefined) {
+    charge += 1 / (1 + (10 ** (ph - Number(residue.basicPka))));
+  }
+  if (residue.acidicPka !== null && residue.acidicPka !== undefined) {
+    charge -= 1 / (1 + (10 ** (Number(residue.acidicPka) - ph)));
+  }
+  return charge;
+}
+
 function renderChargeChart(data) {
   const card = node("div", "chart-card");
-  card.id = "search-target-chemistry-charge-chart";
+  card.id = "search-target-chemistry-charge-profile";
   card.tabIndex = -1;
+  card.append(referenceHeading("Residue charge profile", ""));
+  const chargeNote = node(
+    "p",
+    "muted-copy",
+    `The plotted values show side-chain charge only. Terminal groups also affect the first and last residues: the N-terminus has pKa ${Number(data.chargeModel.nTerminusPka).toFixed(1)} (+0.5 at pH ${Number(data.chargeModel.nTerminusPka).toFixed(1)}), and the C-terminus has pKa ${Number(data.chargeModel.cTerminusPka).toFixed(1)} (−0.5 at pH ${Number(data.chargeModel.cTerminusPka).toFixed(1)}).`,
+  );
+  card.append(chargeNote);
+  const filterGroup = node("fieldset", "charge-residue-filters");
+  filterGroup.append(node("legend", "", "Show residues"));
+  const filterOptions = node("div", "charge-residue-options");
+  const sequenceResidues = new Set(data.residueDetails.map((residue) => residue.residue));
+  const availableResidues = IONIZABLE_RESIDUES.filter((residue) => sequenceResidues.has(residue));
+  if (selectedChargeResidues === null) {
+    selectedChargeResidues = new Set(availableResidues);
+  } else {
+    selectedChargeResidues = new Set(
+      availableResidues.filter((residue) => selectedChargeResidues.has(residue)),
+    );
+  }
+  availableResidues.forEach((residue) => {
+    const info = data.composition.find((item) => item.residue === residue);
+    const label = node("label", "charge-residue-option");
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.value = residue;
+    checkbox.checked = selectedChargeResidues.has(residue);
+    checkbox.setAttribute(
+      "aria-label",
+      `Show ${info?.fullName || residue} (${info?.abbreviation || "UNK"})`,
+    );
+    label.append(
+      checkbox,
+      node("span", "charge-residue-option-letter", residue),
+      node("span", "charge-residue-option-name", info?.fullName || "Unknown residue"),
+    );
+    filterOptions.append(label);
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) selectedChargeResidues.add(residue);
+      else selectedChargeResidues.delete(residue);
+      drawProfile();
+      if (byId("globalSearch").value) updateSearch(byId("globalSearch").value);
+    });
+  });
+  filterGroup.append(filterOptions);
+  card.append(filterGroup);
+  const control = node("div", "charge-ph-control");
+  const sliderLabel = node("label", "", "pH");
+  sliderLabel.htmlFor = "chargePhSlider";
+  const slider = node("input", "charge-ph-slider");
+  slider.id = "chargePhSlider";
+  slider.type = "range";
+  slider.min = "0";
+  slider.max = "14";
+  slider.step = "0.1";
+  slider.value = String(chargeProfilePh);
+  slider.setAttribute("aria-label", "pH for residue charge profile");
+  slider.title = "pH at which the ionizable side-chain charges are estimated.";
+  const valueLabel = node("output", "charge-ph-value", chargeProfilePh.toFixed(1));
+  valueLabel.htmlFor = slider.id;
+  valueLabel.setAttribute("aria-live", "polite");
+  control.append(sliderLabel, slider, valueLabel);
+  card.append(control);
+
   const svgNs = "http://www.w3.org/2000/svg";
   const svg = document.createElementNS(svgNs, "svg");
   svg.setAttribute("viewBox", "0 0 800 310");
   svg.setAttribute("role", "img");
-  svg.setAttribute("aria-label", "Estimated protein net charge across pH");
+  svg.setAttribute("aria-label", "Residue charge at each sequence position");
   svg.classList.add("chart-svg");
   const left = 66;
   const right = 780;
   const top = 22;
   const bottom = 258;
-  const values = data.charge.map(([ph, value]) => [Number(ph), Number(value)]);
-  const min = Math.min(...values.map(([, charge]) => charge), 0);
-  const max = Math.max(...values.map(([, charge]) => charge), 0);
-  const range = Math.max(max - min, 0.1);
-  for (let index = 0; index <= 4; index += 1) {
-    const ratio = index / 4;
-    const y = top + (bottom - top) * ratio;
-    const line = document.createElementNS(svgNs, "line");
-    line.setAttribute("x1", String(left));
-    line.setAttribute("x2", String(right));
-    line.setAttribute("y1", String(y));
-    line.setAttribute("y2", String(y));
-    line.classList.add("chart-gridline");
-    svg.append(line);
+  const minCharge = -1;
+  const maxCharge = 1;
+  const zeroY = bottom - ((0 - minCharge) / (maxCharge - minCharge)) * (bottom - top);
+  const residues = data.residueDetails.filter((residue) =>
+    IONIZABLE_RESIDUES.includes(residue.residue),
+  );
+  const sequenceLength = data.residueDetails.length;
+  const points = [];
+
+  function drawText(x, y, text, anchor) {
     const label = document.createElementNS(svgNs, "text");
-    label.setAttribute("x", String(left - 9));
-    label.setAttribute("y", String(y + 4));
-    label.setAttribute("text-anchor", "end");
+    label.setAttribute("x", String(x));
+    label.setAttribute("y", String(y));
+    label.setAttribute("text-anchor", anchor);
     label.classList.add("chart-axis-label");
-    label.textContent = (max - range * ratio).toFixed(1);
+    label.textContent = text;
     svg.append(label);
   }
-  const points = values.map(([ph, charge], index) => [
-    left + (index / Math.max(values.length - 1, 1)) * (right - left),
-    bottom - ((charge - min) / range) * (bottom - top),
-    ph,
-    charge,
-  ]);
-  const path = document.createElementNS(svgNs, "path");
-  path.setAttribute("d", points.map(([x, y], index) =>
-    `${index ? "L" : "M"} ${x.toFixed(2)} ${y.toFixed(2)}`,
-  ).join(" "));
-  path.classList.add("chart-line");
-  svg.append(path);
-  points.forEach(([x, y, ph, charge]) => {
-    const circle = document.createElementNS(svgNs, "circle");
-    circle.setAttribute("cx", String(x));
-    circle.setAttribute("cy", String(y));
-    circle.setAttribute("r", "5");
-    circle.classList.add("chart-dot");
-    const tooltip = document.createElementNS(svgNs, "title");
-    tooltip.textContent = `pH ${ph} · Estimated net charge ${charge.toFixed(3)} · Henderson–Hasselbalch model`;
-    circle.append(tooltip);
-    svg.append(circle);
-    const xLabel = document.createElementNS(svgNs, "text");
-    xLabel.setAttribute("x", String(x));
-    xLabel.setAttribute("y", "278");
-    xLabel.setAttribute("text-anchor", "middle");
-    xLabel.classList.add("chart-axis-label");
-    xLabel.textContent = String(ph);
-    svg.append(xLabel);
-  });
-  const xAxis = document.createElementNS(svgNs, "text");
-  xAxis.setAttribute("x", String((left + right) / 2));
-  xAxis.setAttribute("y", "302");
-  xAxis.setAttribute("text-anchor", "middle");
-  xAxis.classList.add("chart-axis-label");
-  xAxis.textContent = "pH";
-  svg.append(xAxis);
+
+  function drawProfile() {
+    svg.replaceChildren();
+    points.length = 0;
+    const values = residues.flatMap((residue) => {
+      if (!selectedChargeResidues.has(residue.residue)) return [];
+      const charge = residueChargeAtPH(residue, chargeProfilePh);
+      const x = sequenceLength === 1
+        ? (left + right) / 2
+        : left + ((residue.position - 1) / (sequenceLength - 1)) * (right - left);
+      const y = bottom - ((charge - minCharge) / (maxCharge - minCharge)) * (bottom - top);
+      points.push({ x, y, charge, residue });
+      return [{ x, y, charge, residue }];
+    });
+
+    [-1, -0.5, 0, 0.5, 1].forEach((tick) => {
+      const y = bottom - ((tick - minCharge) / (maxCharge - minCharge)) * (bottom - top);
+      const gridline = document.createElementNS(svgNs, "line");
+      gridline.setAttribute("x1", String(left));
+      gridline.setAttribute("x2", String(right));
+      gridline.setAttribute("y1", String(y));
+      gridline.setAttribute("y2", String(y));
+      gridline.classList.add(tick === 0 ? "chart-zero-line" : "chart-gridline");
+      svg.append(gridline);
+      drawText(left - 9, y + 4, tick.toFixed(1), "end");
+    });
+
+    values.forEach(({ x, y, charge, residue }) => {
+      const chargeClass = charge > 0.01
+        ? "positive"
+        : charge < -0.01
+          ? "negative"
+          : "neutral";
+      const stem = document.createElementNS(svgNs, "line");
+      stem.setAttribute("x1", String(x));
+      stem.setAttribute("x2", String(x));
+      stem.setAttribute("y1", String(zeroY));
+      stem.setAttribute("y2", String(y));
+      stem.classList.add("charge-profile-stem", `charge-profile-${chargeClass}`);
+      const title = document.createElementNS(svgNs, "title");
+      title.textContent = `${residue.fullName} (${residue.abbreviation}) at position ${residue.residueNumber}: charge ${charge.toFixed(3)} at pH ${chargeProfilePh.toFixed(1)}`;
+      stem.append(title);
+      svg.append(stem);
+
+      const marker = document.createElementNS(svgNs, "circle");
+      marker.setAttribute("cx", String(x));
+      marker.setAttribute("cy", String(y));
+      marker.setAttribute("r", "3");
+      marker.classList.add("charge-profile-marker", `charge-profile-${chargeClass}`);
+      marker.append(title.cloneNode(true));
+      svg.append(marker);
+    });
+
+    if (!values.length) {
+      drawText((left + right) / 2, (top + bottom) / 2, "Select at least one residue type", "middle");
+    }
+
+    drawText(left, 278, "1", "start");
+    drawText(right, 278, String(sequenceLength || 1), "end");
+    drawText((left + right) / 2, 302, "Residue position in sequence", "middle");
+    const yAxisLabel = document.createElementNS(svgNs, "text");
+    yAxisLabel.setAttribute("x", "15");
+    yAxisLabel.setAttribute("y", String((top + bottom) / 2));
+    yAxisLabel.setAttribute("text-anchor", "middle");
+    yAxisLabel.setAttribute("transform", `rotate(-90 15 ${(top + bottom) / 2})`);
+    yAxisLabel.classList.add("chart-axis-label");
+    yAxisLabel.textContent = "Residue charge";
+    svg.append(yAxisLabel);
+  }
+
+  drawProfile();
   card.append(svg);
-  attachChartTooltip(svg, card, values.length, (index) => {
-    const [ph, charge] = values[index];
-    return `pH ${ph} · Estimated net charge ${charge.toFixed(3)} · Henderson–Hasselbalch model`;
+  attachChartTooltip(
+    svg,
+    card,
+    () => points.length,
+    (index) => {
+      const { residue, charge } = points[index];
+      const chainLabel = residue.chain === "Sequence" ? "" : ` · Chain ${residue.chain}`;
+      const terminalLabel = residue.isNTerminal
+        ? " · N-terminus"
+        : residue.isCTerminal
+          ? " · C-terminus"
+          : "";
+      return `pH ${chargeProfilePh.toFixed(1)} · Residue ${residue.residueNumber}${chainLabel} · ${residue.fullName} (${residue.abbreviation}/${residue.residue}) · Charge ${charge.toFixed(3)}${terminalLabel}`;
+    },
+    () => points.map((point) => point.x),
+  );
+  slider.addEventListener("input", () => {
+    chargeProfilePh = Number(slider.value);
+    valueLabel.value = chargeProfilePh.toFixed(1);
+    valueLabel.textContent = chargeProfilePh.toFixed(1);
+    svg.setAttribute(
+      "aria-label",
+      `Residue charge at pH ${chargeProfilePh.toFixed(1)}`,
+    );
+    drawProfile();
+    if (byId("globalSearch").value) updateSearch(byId("globalSearch").value);
   });
   return card;
 }
@@ -741,14 +1001,14 @@ function renderChargeChart(data) {
 function renderChemistry(data) {
   const panel = node("div", "category-panel");
   const charge = block(
-    "Estimated net charge by pH",
-    "Henderson–Hasselbalch estimate; hover over a point for its pH and charge.",
-    "protparam",
+    "Residue charge profile",
+    "",
+    "",
   );
   charge.append(renderChargeChart(data));
   const chargeGroups = block(
     "Residue charge groups at native pH",
-    "Side-chain groups at pH 7.4: Lys/Arg positive, Asp/Glu negative, and the remaining residues mostly neutral.",
+    "",
     "protparam",
   );
   chargeGroups.append(renderBarChart(groupComposition(data.composition, "chemistry")));
@@ -760,12 +1020,7 @@ function renderChemistry(data) {
   properties.append(
     createTable(["Property", "Value"], data.chemistry, [], "chemistry", "property"),
   );
-  const note = node(
-    "p",
-    "note",
-    "Charge and composition properties are theoretical sequence-based estimates, not experimental measurements.",
-  );
-  panel.append(charge, chargeGroups, properties, note);
+  panel.append(charge, chargeGroups, properties);
   return panel;
 }
 
@@ -780,6 +1035,7 @@ function renderFeatures(data) {
       const reference = references[index] || "features";
       if (reference !== "features") {
         const link = node("a", "reference-link", label);
+        addParameterTooltip(link, label);
         link.href = "#";
         link.dataset.reference = reference;
         row.cells[0].replaceChildren(link);
@@ -818,7 +1074,7 @@ function renderCleavage(data) {
     const row = node("div", "cleavage-row");
     row.id = `search-target-cleavage-site-${rowIndex}`;
     row.tabIndex = -1;
-    row.append(node("strong", "cleavage-label", label));
+    row.append(addParameterTooltip(node("strong", "cleavage-label", label), label));
     const track = node("div", "cleavage-track");
     track.setAttribute("aria-label", `${label} cleavage positions`);
     const positions = rowIndex === rows.length - 1
@@ -1021,12 +1277,18 @@ function collectSearchRows() {
   }
   if (visibleCategories.includes("chemistry")) {
     pushRows("chemistry", currentAnalysis.chemistry, "property");
+    const chargeResidues = currentAnalysis.residueDetails.filter((residue) =>
+      IONIZABLE_RESIDUES.includes(residue.residue)
+      && (selectedChargeResidues === null || selectedChargeResidues.has(residue.residue)),
+    );
     pushGraph(
       "chemistry",
-      "Charge versus pH",
-      currentAnalysis.charge.map(([_ph, value]) => Number(value)),
-      currentAnalysis.charge.map(([ph]) => `pH ${ph}`),
-      "search-target-chemistry-charge-chart",
+      `Residue charge profile at pH ${chargeProfilePh.toFixed(1)}`,
+      chargeResidues.map((residue) => residueChargeAtPH(residue, chargeProfilePh)),
+      chargeResidues.map((residue) =>
+        `Position ${residue.residueNumber} ${residue.chain} ${residue.residue}`,
+      ),
+      "search-target-chemistry-charge-profile",
     );
   }
   if (visibleCategories.includes("features")) {
@@ -1071,9 +1333,25 @@ function updateSearch(query) {
     tr.setAttribute("role", "button");
     tr.setAttribute("aria-label", `Open ${CATEGORY_LABELS[row.category]}: ${row.label}`);
     tr.tabIndex = 0;
-    [CATEGORY_LABELS[row.category], row.label, row.value].forEach((value) =>
-      tr.append(node("td", "", value)),
+    const displayedValues = [CATEGORY_LABELS[row.category], row.label, row.value];
+    displayedValues.forEach((value) => {
+      const cell = node("td");
+      appendSearchHighlight(cell, value, term);
+      tr.append(cell);
+    });
+    const matchingSource = row.searchable.find((value) =>
+      value.toLocaleLowerCase().includes(term),
     );
+    if (
+      matchingSource
+      && !displayedValues.some((value) => value.toLocaleLowerCase().includes(term))
+    ) {
+      const valueCell = tr.cells[2];
+      const context = node("span", "search-match-context");
+      context.append(document.createTextNode("Match: "));
+      appendSearchHighlight(context, matchingSource, term);
+      valueCell.append(node("br"), context);
+    }
     body.append(tr);
   });
   if (!matches.length) {
@@ -1082,6 +1360,24 @@ function updateSearch(query) {
     td.colSpan = 3;
     tr.append(td);
     body.append(tr);
+  }
+}
+
+function appendSearchHighlight(container, text, term) {
+  const normalizedText = text.toLocaleLowerCase();
+  let cursor = 0;
+  let matchIndex = normalizedText.indexOf(term, cursor);
+  while (matchIndex !== -1) {
+    if (matchIndex > cursor) {
+      container.append(document.createTextNode(text.slice(cursor, matchIndex)));
+    }
+    const highlight = node("mark", "search-match", text.slice(matchIndex, matchIndex + term.length));
+    container.append(highlight);
+    cursor = matchIndex + term.length;
+    matchIndex = normalizedText.indexOf(term, cursor);
+  }
+  if (cursor < text.length || cursor === 0) {
+    container.append(document.createTextNode(text.slice(cursor)));
   }
 }
 
@@ -1110,6 +1406,8 @@ function openSearchTarget(resultRow) {
 
 function displayAnalysis(data) {
   currentAnalysis = data;
+  byId("downloadPdbButton").disabled = data.pdbDownloadAvailable !== true;
+  selectedChargeResidues = null;
   visibleCategories = getCategories(data.context);
   activeCategory = visibleCategories[0];
   byId("globalSearch").value = "";
@@ -1121,7 +1419,7 @@ function displayAnalysis(data) {
     data.context === "antibody"
       ? "Heavy and light chain overview."
       : data.context === "structure"
-        ? `${data.sequence.length.toLocaleString()} residues · PDB ${data.pdbId} · ${data.analysisChains.length > 1 ? `all ${data.analysisChains.length} chains` : `chain ${data.analysisChains[0]}`}`
+        ? `${data.sequence.length.toLocaleString()} residues · ${data.structureName || `PDB ${data.pdbId}`} · ${data.analysisChains.length > 1 ? `all ${data.analysisChains.length} chains` : `chain ${data.analysisChains[0]}`}`
         : `${data.sequence.length.toLocaleString()} residues · Protein sequence`;
   byId("resultContext").textContent =
     data.context === "antibody"
@@ -1209,24 +1507,50 @@ async function submitAntibody(event) {
 async function fetchStructure(event) {
   event.preventDefault();
   const button = byId("fetchButton");
+  const pdbInput = byId("pdbInput");
+  if (!pdbInput) {
+    setStatus("The PDB identifier field is unavailable. Reload the app and try again.", "error");
+    return;
+  }
+  const pdbId = pdbInput.value.trim();
+  if (!/^[A-Za-z0-9]{4}$/.test(pdbId)) {
+    const message = "Enter a four-character PDB ID, such as 1A7M.";
+    byId("pdbStatus").textContent = message;
+    setStatus(message, "error");
+    pdbInput.focus();
+    return;
+  }
+  setStructureSelectionEnabled(false);
   setBusy(button, true, "Fetching…");
   byId("pdbStatus").textContent = "Retrieving structure and available protein chains…";
   try {
-    const result = await invoke("fetchPdb", byId("pdbInput").value);
+    const result = await invoke("fetchPdb", pdbId);
     if (!result.ok) {
       byId("pdbStatus").textContent = result.error;
       setStatus(result.error, "error");
       return;
+    }
+    if (
+      !Array.isArray(result.chains)
+      || result.chains.length === 0
+      || typeof result.structureKey !== "string"
+      || typeof result.pdbId !== "string"
+    ) {
+      throw new Error("The PDB was retrieved, but its chain list could not be read.");
     }
     currentAnalysis = null;
     visibleCategories = [];
     byId("sequenceInput").value = "";
     byId("proteinName").value = "";
     byId("dataNav").disabled = true;
+    byId("exportButton").disabled = true;
     setView("input");
     byId("proteinMode").click();
     byId("pdbInput").value = result.pdbId;
-    populateChains(result.chains, result.selectedChain);
+    activeStructureKey = result.structureKey;
+    activeStructureSource = "fetch";
+    populateChains(result.chains);
+    byId("downloadPdbButton").disabled = false;
     byId("pdbStatus").textContent = `Loaded PDB ${result.pdbId} with ${result.chains.length} chain(s). Choose a chain or all chains, then analyze.`;
     setStatus("Select the PDB chain(s) to include in the analysis.");
   } catch (error) {
@@ -1234,44 +1558,154 @@ async function fetchStructure(event) {
     setStatus(error.message, "error");
   } finally {
     setBusy(button, false);
+    if (activeStructureKey) setStructureSelectionEnabled(true);
   }
 }
 
-function populateChains(chains, selectedId) {
+function setStructureSelectionEnabled(enabled) {
   const select = byId("chainSelect");
+  const button = byId("analyzeChainButton");
+  const clearButton = byId("clearStructureButton");
+  if (!select || !button || !clearButton) {
+    throw new Error("The shared chain-selection controls are unavailable.");
+  }
+  select.disabled = !enabled;
+  button.disabled = !enabled;
+  clearButton.disabled = !enabled;
+}
+
+function populateChains(chains) {
+  const select = byId("chainSelect");
+  if (!select) {
+    throw new Error("The chain-selection dropdown is unavailable.");
+  }
   select.replaceChildren();
   const allOption = node("option", "", `All chains · ${(chains || []).reduce((total, chain) => total + chain.length, 0)} aa`);
   allOption.value = "__all__";
+  allOption.selected = true;
   select.append(allOption);
   (chains || []).forEach((chain) => {
     const option = node("option", "", `Chain ${chain.id} · ${chain.length} aa`);
     option.value = chain.id;
-    option.selected = chain.id === selectedId;
     select.append(option);
   });
-  byId("chainPicker").hidden = !chains || chains.length === 0;
+  setStructureSelectionEnabled(Array.isArray(chains) && chains.length > 0);
 }
 
 async function analyzeSelectedChain() {
+  const select = byId("chainSelect");
   const button = byId("analyzeChainButton");
+  if (!select || !button || select.disabled || !activeStructureKey) {
+    setStatus("Fetch or upload a PDB/CIF structure before choosing chains.", "error");
+    return;
+  }
   setBusy(button, true, "Analyzing…");
   try {
-    const chainId = byId("chainSelect").value;
+    const chainId = select.value;
     const result = chainId === "__all__"
-      ? await invoke("analyzeAllChains", byId("pdbInput").value)
-      : await invoke("analyzeChain", byId("pdbInput").value, chainId);
+      ? await invoke("analyzeAllChains", activeStructureKey)
+      : await invoke("analyzeChain", activeStructureKey, chainId);
     if (!result.ok) {
       setStatus(result.error, "error");
       return;
     }
     byId("sequenceInput").value = result.analysis.sequence;
     byId("proteinName").value = result.analysis.name;
-    byId("pdbStatus").textContent = `Analyzed ${chainId === "__all__" ? "all chains" : `chain ${chainId}`} from PDB ${byId("pdbInput").value.toUpperCase()}.`;
+    const sourceName = result.analysis.structureName || result.analysis.pdbId || "PDB/CIF file";
+    const status = `Analyzed ${chainId === "__all__" ? "all chains" : `chain ${chainId}`} from ${sourceName}.`;
+    byId(activeStructureSource === "fetch" ? "pdbStatus" : "uploadPdbStatus").textContent = status;
     displayAnalysis(result.analysis);
   } catch (error) {
     setStatus(error.message, "error");
   } finally {
     setBusy(button, false);
+    button.disabled = !select || select.options.length <= 1;
+  }
+}
+
+async function uploadPdb() {
+  try {
+    const result = await invoke("openPdb");
+    if (result.cancelled) return;
+    if (!result.ok) {
+      byId("uploadPdbStatus").textContent = result.error;
+      setStatus(result.error, "error");
+      return;
+    }
+    activeStructureKey = result.structureKey;
+    activeStructureSource = "upload";
+    currentAnalysis = null;
+    visibleCategories = [];
+    byId("sequenceInput").value = "";
+    byId("proteinName").value = "";
+    byId("dataNav").disabled = true;
+    byId("exportButton").disabled = true;
+    setView("input");
+    byId("proteinMode").click();
+    byId("downloadPdbButton").disabled = true;
+    populateChains(result.chains);
+    byId("uploadPdbStatus").textContent =
+      `Loaded ${result.structureName} with ${result.chains.length} chain(s). Choose a chain or all chains, then analyze.`;
+    setStatus("Select the uploaded PDB chain(s) to include in the analysis.");
+  } catch (error) {
+    byId("uploadPdbStatus").textContent = error.message;
+    setStatus(error.message, "error");
+  }
+}
+
+async function clearStructure() {
+  const button = byId("clearStructureButton");
+  setBusy(button, true, "Clearing…");
+  try {
+    const result = await invoke("clearPdb");
+    if (!result.ok) {
+      setStatus(result.error || "Unable to clear the loaded structure.", "error");
+      return;
+    }
+    activeStructureKey = "";
+    activeStructureSource = "";
+    byId("pdbInput").value = "";
+    byId("chainSelect").replaceChildren(
+      Object.assign(node("option", "", "All chains"), {
+        value: "__all__",
+        selected: true,
+      }),
+    );
+    setStructureSelectionEnabled(false);
+    byId("downloadPdbButton").disabled = true;
+    byId("pdbStatus").textContent = "No structure loaded.";
+    byId("uploadPdbStatus").textContent = "No structure file uploaded.";
+    if (currentAnalysis?.context === "structure") {
+      currentAnalysis = null;
+      visibleCategories = [];
+      byId("sequenceInput").value = "";
+      byId("proteinName").value = "";
+      byId("dataNav").disabled = true;
+      byId("exportButton").disabled = true;
+      setView("input");
+    }
+    setStatus("Loaded PDB/CIF structure cleared.");
+  } catch (error) {
+    setStatus(error.message, "error");
+  } finally {
+    setBusy(button, false);
+    button.disabled = !activeStructureKey;
+  }
+}
+
+async function downloadPdb() {
+  try {
+    const result = await invoke("downloadPdb");
+    if (result.ok) {
+      byId("pdbStatus").textContent = result.message;
+      setStatus(result.message, "success");
+    } else if (result.error) {
+      byId("pdbStatus").textContent = result.error;
+      setStatus(result.error, "error");
+    }
+  } catch (error) {
+    byId("pdbStatus").textContent = error.message;
+    setStatus(error.message, "error");
   }
 }
 
@@ -1425,6 +1859,9 @@ function bindEvents() {
   byId("saveSettings").addEventListener("click", saveSettings);
   byId("fetchForm").addEventListener("submit", fetchStructure);
   byId("analyzeChainButton").addEventListener("click", analyzeSelectedChain);
+  byId("clearStructureButton").addEventListener("click", clearStructure);
+  byId("downloadPdbButton").addEventListener("click", downloadPdb);
+  byId("uploadPdbButton").addEventListener("click", uploadPdb);
   byId("proteinForm").addEventListener("submit", submitProtein);
   byId("antibodyForm").addEventListener("submit", submitAntibody);
   byId("proteinMode").addEventListener("click", () => {
@@ -1454,11 +1891,14 @@ function bindEvents() {
   byId("clearButton").addEventListener("click", () => {
     byId("sequenceInput").value = "";
     byId("proteinName").value = "";
+    byId("heavyInput").value = "";
+    byId("lightInput").value = "";
     currentAnalysis = null;
     visibleCategories = [];
     byId("dataNav").disabled = true;
+    byId("exportButton").disabled = true;
     setView("input");
-    setStatus("Sequence input cleared.");
+    setStatus("Sequence inputs cleared.");
   });
   byId("globalSearch").addEventListener("input", (event) => updateSearch(event.target.value));
   byId("clearSearch").addEventListener("click", () => {

@@ -90,6 +90,26 @@ def main() -> int:
     else:
         print("Requirements are already installed.")
 
+    if sys.platform == "win32":
+        pythonw = Path(sys.executable).with_name("pythonw.exe")
+        if not pythonw.is_file():
+            raise FileNotFoundError(
+                f"pythonw.exe was not found beside the active interpreter: {pythonw}"
+            )
+        creation_flags = (
+            subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+        )
+        subprocess.Popen(
+            [str(pythonw), str(MAIN_FILE)],
+            cwd=PROJECT_ROOT,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=creation_flags,
+            close_fds=True,
+        )
+        return 0
+
     return subprocess.run(
         [sys.executable, str(MAIN_FILE)],
         cwd=PROJECT_ROOT,

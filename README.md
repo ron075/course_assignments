@@ -144,3 +144,19 @@ Main prompts and tasks included:
 ## Git
 
 Git integration in Visual Studio Code was used to manage the project and track changes as part of the assignment.
+
+##Process
+
+The development process was iterative: I started using chat-GPT to organise the wanted app and its strucutre (final app structure, as given to copilot, is included in "App_Design.txt").
+After strucutre was given, Co-Pilot suggested to base the app on python, with html web page, styling in CSS and JavaScript for seamless injection of data analyzed and processed in python into the web page.
+Following that, app was built feature by feature (copilot was told to "Build features step by step, with approval between each"). Copilot also performed code/app testing without prompting, speeding the entire process even further.
+
+After the app as designedin the "App_Design" file was built, further improvements and features were added. 
+For example:
+"Add an import button, place it in the side bar above export"
+"Remove the native title bar, add a custom circle close button with X to the top right corner, with padding around it"
+"Add the graph bar from composition tab into hydrophobicity tab, group the bars by hydrophobic/neutral/hydrophilic. On "Hydrophobicity by residue" graph hover should show a tooltip with residue number, chain, Abb/letter and value"
+"Add the graph bar from composition tab into chemistry and charge tab, group the bars by hydrophobic/neutral/hydrophilic. On "Hydrophobicity by residue" graph hover should show a tooltip with residue number, chain, Abb/letter and value"
+in hydrophobicity should have add the same bar graph as in composition, but by residue charge. Replace the net charge by ph graph with a residue charge profile, showing the ph of each residue in sequence, with a ph slider allowing to show the charge change. Add axis labels."
+
+Prompting stopped and final result was uploaded when layout and function was deemed good and easy to use.										
