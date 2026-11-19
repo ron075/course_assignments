@@ -1,0 +1,8 @@
+__pycache__/
+.pytest_cache/
+test-report.html
+tests/online_validation.json
+tests/test_run_state.json
+tests/test-results.xml
+tests/online_test_structure.*
+tests/online_test_sequence.*

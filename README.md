@@ -199,13 +199,6 @@ The launcher automatically checks for and installs missing Python dependencies f
 
 Start the Flask web application from the `day04` folder.
 
-**Windows:**
-
-```powershell
-py -m pip install -r requirements.txt
-py run_web.py
-```
-
 The launcher opens `http://127.0.0.1:5000` in the default browser.
 
 The desktop application remains available through `run_app.py`.
