@@ -229,7 +229,7 @@ This project fulfills the Day 04 assignment by taking the previous implementatio
 
 The original desktop application remains available, alongside the new Flask-based web interface.
 
-#Day 05 — Protein Analysis Studio
+# Day 05 — Protein Analysis Studio
 
 Protein Analysis Studio has a PySide6 desktop interface and a Flask web
 interface. Both use the same Python analysis logic.
